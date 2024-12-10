@@ -1,0 +1,79 @@
+name: SAST Check and Gradle Build
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  sast-and-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: List repository contents
+      run: ls -R
+    - name: Check Gradle Wrapper files
+      run: |
+        if [ -f "gradlew" ] && [ -f "gradlew.bat" ] && [ -d "gradle/wrapper" ]; then
+          echo "Gradle Wrapper files found."
+        else
+          echo "Gradle Wrapper files are missing."
+          echo "Contents of the current directory:"
+          ls -la
+          echo "Contents of the gradle directory (if it exists):"
+          [ -d "gradle" ] && ls -la gradle || echo "gradle directory not found"
+          exit 1
+        fi
+    - name: Validate Gradle Wrapper
+      uses: gradle/wrapper-validation-action@v1
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.gradle/caches
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    - name: Ensure gradlew is executable
+      run: chmod +x gradlew
+    - name: Create project zip
+      run: zip -r project.zip . -x "*.git*"
+    - name: Perform SAST Scan
+      id: sast
+      run: |
+        RESPONSE=$(curl -X POST \
+          -H "Client-ID: ${{ secrets.INTRUCEPT_CLIENT_ID }}" \
+          -H "Client-Secret: ${{ secrets.INTRUCEPT_CLIENT_SECRET }}" \
+          -F "projectZipFile=@project.zip" \
+          -F "applicationId=${{ secrets.INTRUCEPT_APPLICATION_ID }}" \
+          -F "scanName=swift-firefox-ios-SAST Scan - Gradle - from GitHub Actions" \
+          -F "language=swift" \
+          https://appsecops-api.intruceptlabs.com/api/v1/integrations/sast-scans)
+        
+        echo "SAST Response:"
+        VULNS_TABLE=$(echo "$RESPONSE" | jq -r '.vulnsTable')
+        if [ "$VULNS_TABLE" != "null" ] && [ -n "$VULNS_TABLE" ]; then
+          echo "$VULNS_TABLE"
+        else
+          echo "No SAST vulnerabilities found"
+        fi
+        
+        CAN_PROCEED=$(echo $RESPONSE | jq -r '.canProceed')
+        echo "canProceed=$CAN_PROCEED" >> $GITHUB_ENV
+    - name: Check SAST result
+      if: env.canProceed != 'true'
+      run: |
+        echo "SAST scan failed. Build cancelled."
+        exit 1
+    - name: Build with Gradle
+      if: env.canProceed == 'true'
+      run: ./gradlew build
+    - name: Upload artifact
+      if: env.canProceed == 'true'
+      uses: actions/upload-artifact@v3
+      with:
+        name: project-files
+        path: project.zip

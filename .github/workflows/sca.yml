@@ -35,7 +35,7 @@ jobs:
           -H "Client-Secret: ${{ secrets.INTRUCEPT_CLIENT_SECRET }}" \
           -F "projectZipFile=@project.zip" \
           -F "applicationId=${{ secrets.INTRUCEPT_APPLICATION_ID }}" \
-          -F "scanName=swift-firefox-ios-SCA Scan - Gradle - from GitHub Actions" \
+          -F "scanName=swift-firefox-ios-SCA Re-Scan - Gradle - from GitHub Actions" \
           -F "language=swift" \
           https://appsecops-api.intruceptlabs.com/api/v1/integrations/sca-scans)
         
